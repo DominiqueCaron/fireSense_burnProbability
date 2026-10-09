@@ -1,0 +1,225 @@
+---
+title: "fireSense_burnProbability Manual"
+subtitle: "v.`r SpaDES.core::moduleMetadata(module = 'fireSense_burnProbability', path = '..')$version`"
+date: "Last updated: `r Sys.Date()`"
+output:
+  bookdown::html_document2:
+    toc: true
+    toc_float: true
+    theme: sandstone
+    number_sections: false
+    df_print: paged
+    keep_md: yes
+editor_options:
+  chunk_output_type: console
+  bibliography: citations/references_fireSense_burnProbability.bib
+link-citations: true
+always_allow_html: true
+---
+
+# fireSense_burnProbability Module
+
+<!-- the following are text references used in captions for LaTeX compatibility -->
+(ref:fireSense_burnProbability) *fireSense_burnProbability*
+
+```{r setup-fireSense_burnProbability, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE, results = "hold") ## change to eval = TRUE if all chunks are to be evaluated
+
+dir.create("figures", showWarnings = FALSE)
+
+download.file(url = "https://img.shields.io/badge/Made%20with-Markdown-1f425f.png",
+              destfile = "figures/markdownBadge.png",
+              mode = "wb")
+```
+
+[![made-with-Markdown](figures/markdownBadge.png)](https://commonmark.org)
+
+<!-- if knitting to pdf remember to add the pandoc_args: ["--extract-media", "."] option to yml in order to get the badge images -->
+
+#### Authors:
+
+`r paste(as.character(SpaDES.core::moduleMetadata(module = "fireSense_burnProbability", path = '..')$authors), sep = ', ')`
+<!-- ideally separate authors with new lines, '\n' not working -->
+
+## Module Overview
+
+### Why this module exists
+
+`fireSense_ignitionPredict` and `fireSense_burn` together produce one *realized* fire
+year: a single random draw of which pixels ignite, which escape, and how far each
+escaped fire spreads. That is appropriate for a single simulation replicate, but it
+does not by itself say how *likely* any given pixel was to burn. Because the
+underlying spread process is a percolation process on a heterogeneous, spatially
+correlated probability surface, there is no closed-form expression for a pixel's
+burn probability once spread probability varies by pixel and escaped fires jump
+and interact. `fireSense_burnProbability` estimates that probability empirically,
+by Monte Carlo: it repeats the ignition/escape/spread draw many times for the same
+year's covariates and fitted models, and reports the fraction of repetitions in
+which each pixel burned.
+
+### Module summary
+
+At each `.runInterval`, `fireSense_burnProbability`:
+
+1. Snapshots (deep-copies) every `sim` object that `fireSense_ignitionPredict` and
+   `fireSense_burn` write to (`ignitionsAndEscapes`, `burnMap`, `rstCurrentBurn`,
+   `rstAnnualBurnID`, `burnDT`, `burnSummary`).
+2. Runs `nIterations` independent draws, each one calling those two modules'
+   ignition/escape and fire-spread functions directly (via `sim$.mods`), so every
+   draw uses exactly the same stochastic logic a real simulation year would -- the
+   same ignition/escape models, the same per-pixel spread probability
+   (`fireSense_SpreadPredicted`), and the same year-random-effect mechanism
+   (`fireSense_SpreadSD`).
+3. Tallies, for each pixel, the number of iterations in which it burned.
+4. Restores the snapshotted objects, so the simulation's "realized" fire year
+   (what `fireSense_burn` actually produced for this year, and what downstream
+   modules such as vegetation or carbon-accounting modules read) is **left
+   untouched**. This module is purely additive: it only adds one new output
+   raster and never changes what a simulation run without it would have produced.
+
+Only the stochastic pieces vary across iterations. The deterministic
+spread-probability surface (`fireSense_SpreadPredicted`) is computed once per year
+upstream, by `fireSense_spreadPredict`, and is **not** recomputed inside the Monte
+Carlo loop -- it is treated as fixed input to each draw, as it would be in a single
+realized year.
+
+### Module inputs and parameters
+
+Table \@ref(tab:moduleInputs-fireSense_burnProbability) shows the full list of module inputs.
+
+```{r moduleInputs-fireSense_burnProbability, echo = FALSE, eval = TRUE, message = FALSE, warning = FALSE}
+df_inputs <- SpaDES.core::moduleInputs("fireSense_burnProbability", "..")
+knitr::kable(df_inputs,
+             caption = "List of (ref:fireSense_burnProbability) input objects and their description.") |>
+  kableExtra::kable_styling(latex_options = "scale_down", full_width = TRUE)
+```
+
+Summary of user-visible parameters (Table \@ref(tab:moduleParams-fireSense_burnProbability)).
+
+```{r moduleParams-fireSense_burnProbability, echo = FALSE, eval = TRUE, message = FALSE, warning = FALSE}
+df_params <- SpaDES.core::moduleParams("fireSense_burnProbability", "..")
+knitr::kable(df_params, caption = "List of (ref:fireSense_burnProbability) parameters and their description.") |>
+  kableExtra::kable_styling(latex_options = "scale_down", full_width = TRUE)
+```
+
+`nIterations` is the main cost/precision knob. The default, 10,000, gives a Monte
+Carlo standard error on an estimated probability $p$ of roughly
+$\sqrt{p(1-p)/10000}$ -- at most about 0.5 percentage points (at $p = 0.5$), and
+much less at the low probabilities typical of most pixels in most years. Each
+iteration re-runs a full ignite + spread cycle over the whole study area, so
+runtime scales linearly with `nIterations`; reduce it for quick checks or large
+study areas, at the cost of a noisier estimate (particularly for low-probability
+pixels, where a small absolute Monte Carlo error is a large *relative* error).
+
+### Events
+
+- `init`: schedules the first `estimate` event at `.runInitialTime`.
+- `estimate`: runs the Monte Carlo loop described above and writes
+  `burnProbability`; reschedules itself every `.runInterval` years (`NA`
+  estimates once only).
+
+`estimate` is scheduled with a higher event priority (`5.14`) than `fireSense_burn`'s
+`burn` event (`5.13`), so each year's *realized* burn happens first and this
+module's snapshot/restore wraps around a state that already reflects that year's
+true draw.
+
+### Saving
+
+The module saves nothing itself; use the `outputs` argument of `simInit()` to save
+`burnProbability`.
+
+### Module outputs
+
+Description of the module outputs (Table \@ref(tab:moduleOutputs-fireSense_burnProbability)).
+
+```{r moduleOutputs-fireSense_burnProbability, echo = FALSE, eval = TRUE, message = FALSE, warning = FALSE}
+df_outputs <- SpaDES.core::moduleOutputs("fireSense_burnProbability", "..")
+knitr::kable(df_outputs, caption = "List of (ref:fireSense_burnProbability) outputs and their description.") |>
+  kableExtra::kable_styling(latex_options = "scale_down", full_width = TRUE)
+```
+
+#### Interpreting `burnProbability`
+
+`burnProbability` is a `SpatRaster` aligned with `flammableRTM`, with one
+value per flammable pixel (non-flammable pixels are `NA`). Each value is the
+**fraction of `nIterations` Monte Carlo draws in which that pixel burned**, for the
+year the `estimate` event ran -- i.e. an estimated marginal probability of burning
+*this interval*, given this year's fitted ignition, escape, and spread models and
+this year's covariates (weather, fuels, etc., as prepared upstream by
+`fireSense_dataPrepPredict`).
+
+Some care is needed in interpreting it:
+
+- It is a **per-year** (or per-`.runInterval`) probability, not a cumulative or
+  long-run annual burn probability; a pixel's value can change substantially from
+  one `estimate` event to the next as covariates (e.g., weather) change.
+- It reflects the *conditional* probability given this year's covariates and the
+  currently fitted models -- it does not propagate parameter uncertainty from
+  `fireSense_ignitionFit` / `fireSense_spreadFit` / `fireSense_EscapeFit` (each
+  Monte Carlo draw reuses the same fitted parameter set chosen by `.rep`
+  upstream, the same as a single realized run would).
+- It is subject to Monte Carlo sampling error (see `nIterations` above); a pixel
+  reported as 0 may simply never have burned in `nIterations` draws of a nonzero
+  but small true probability, rather than having truly zero probability.
+- Because fires spread spatially, **neighboring pixels' burn probabilities are not
+  independent** -- `burnProbability` gives each pixel's own marginal
+  probability but says nothing about the joint probability that several
+  particular pixels burn together in the same draw. For questions about
+  joint/conditional burning across pixels, the per-iteration pixel sets (not
+  currently a module output) would be needed.
+
+### Usage
+
+`fireSense_burnProbability` needs the fitted and predicted objects the other
+`fireSense_*` modules provide, so run it alongside them:
+
+```{r module usage example, eval = FALSE}
+library(SpaDES.core)
+
+modules <- list("fireSense_dataPrepPredict", "fireSense_ignitionPredict",
+                "fireSense_spreadPredict", "fireSense_burn",
+                "fireSense_burnProbability")
+
+mySim <- simInit(times = list(start = 2011, end = 2100),
+                 params = list(fireSense_burnProbability = list(nIterations = 10000L,
+                                                                .runInterval = 10)),
+                 modules = modules,
+                 objects = objects, ## fitted fireSense models, rasterToMatch, flammableRTM, etc.
+                 paths = list(modulePath = ".."))
+spades(mySim)
+
+mySim$burnProbability ## this interval's estimated per-pixel burn probability
+```
+
+Running the Monte Carlo loop every year can be expensive at landscape scale
+(`nIterations` full ignite + spread cycles, each comparable in cost to one real
+simulation year); setting `.runInterval` larger than 1 (e.g., every 5 or 10 years)
+is usually the more practical choice for long simulations.
+
+### Links to other modules
+
+- `fireSense_ignitionPredict` supplies the ignition/escape draw logic
+  (`IgnitionPredictRun()`) called inside the Monte Carlo loop, and
+  `ignitionsAndEscapes`, which is snapshotted and restored.
+- `fireSense_burn` supplies the fire-spread logic (`burn()`) called inside the
+  Monte Carlo loop, and `burnMap`, `rstCurrentBurn`, `rstAnnualBurnID`, `burnDT`,
+  `burnSummary`, all snapshotted and restored.
+- `fireSense_spreadPredict` supplies `fireSense_SpreadPredicted` and
+  `fireSense_SpreadSD`, held fixed across Monte Carlo iterations.
+- `fireSense_summary` summarizes *realized* `burnMap`/`burnSummary` across
+  replicates; it does not read this module's outputs. Comparing
+  `burnProbability` (one year's Monte Carlo estimate) against
+  `fireSense_summary`'s across-replicate realized burn frequencies is a useful
+  consistency check, though the two are not guaranteed to agree exactly (the
+  latter also varies covariates/weather across years and replicates, which this
+  module's single-year Monte Carlo loop does not).
+
+### Getting help
+
+- <https://github.com/PredictiveEcology/fireSense_burnProbability/issues>
+
+## References
+
+<!-- autogenerated from bibligraphy -->
+
+<!-- Drafted with assistance from Claude (Posit Assistant). -->
