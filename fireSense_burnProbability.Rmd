@@ -102,9 +102,9 @@ knitr::kable(df_params, caption = "List of (ref:fireSense_burnProbability) param
   kableExtra::kable_styling(latex_options = "scale_down", full_width = TRUE)
 ```
 
-`nIterations` is the main cost/precision knob. The default, 10,000, gives a Monte
+`nIterations` is the main cost/precision knob. The default, 1 000 000, gives a Monte
 Carlo standard error on an estimated probability $p$ of roughly
-$\sqrt{p(1-p)/10000}$ -- at most about 0.5 percentage points (at $p = 0.5$), and
+$\sqrt{p(1-p)/1000000}$ -- at most about 0.5 percentage points (at $p = 0.5$), and
 much less at the low probabilities typical of most pixels in most years. Each
 iteration re-runs a full ignite + spread cycle over the whole study area, so
 runtime scales linearly with `nIterations`; reduce it for quick checks or large

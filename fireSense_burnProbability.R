@@ -20,7 +20,7 @@ defineModule(sim, list(
   reqdPkgs = list("data.table", "terra", "SpaDES.core (>=3.0.4)"),
   loadOrder = list(after = c("fireSense_ignitionPredict", "fireSense_spreadPredict", "fireSense_burn")),
   parameters = bindrows(
-    defineParameter("nIterations", "integer", 10000L, 1L, NA,
+    defineParameter("nIterations", "integer", 10^6, 1L, NA,
                     desc = paste("Number of Monte Carlo iterations (independent ignition/escape/spread",
                                  "draws) used to estimate burn probability at each `.runInterval`.")),
     defineParameter(".runInitialTime", "numeric", default = start(sim), NA, NA,
